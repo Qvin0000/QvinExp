@@ -63,7 +63,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ItemData.cs" />
-    <Compile Include="MapQ.cs" />
+    <Compile Include="ItemQ.cs" />
     <Compile Include="MySettings.cs" />
     <Compile Include="QvinExp.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

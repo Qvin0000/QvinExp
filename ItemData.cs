@@ -20,13 +20,13 @@ namespace QvinExp
     {
         public readonly NormalInventoryItem _inventoryItem;
 
-        public string Path;
-        public string ClassName;
-        public string BaseName;
-        public ItemRarity Rarity;
-        public int ItemQuality;
-        public bool BIdentified;
-        public int ItemLevel;
+        public string Path { get;  }
+        public string ClassName { get; }
+        public string BaseName { get;  }
+        public ItemRarity Rarity { get;  }
+        public int ItemQuality { get;  }
+        public bool BIdentified { get; }
+        public int ItemLevel {  get;  }
 
         public ItemData(NormalInventoryItem inventoryItem, BaseItemType baseItemType)
         {
@@ -38,7 +38,6 @@ namespace QvinExp
             Rarity = mods.ItemRarity;
             BIdentified = mods.Identified;
             ItemLevel = mods.ItemLevel;
-
             var quality = item.GetComponent<Quality>();
             ItemQuality = quality.ItemQuality;
             ClassName = baseItemType.ClassName;

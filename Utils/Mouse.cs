@@ -117,9 +117,9 @@ namespace QvinExp.Utils
             var posY = (int) coords.Y;
             SetCursorPos(posX, posY);
             Thread.Sleep(MOVEMENT_DELAY + extraDelay);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            LeftMouseDown();
             Thread.Sleep(CLICK_DELAY);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            LeftMouseUp();
         }
 
         public static void VerticalScroll(bool forward, int clicks)
@@ -148,8 +148,7 @@ namespace QvinExp.Utils
         {
             var cursor = GetCursorPositionVector();
             var stepVector2 = new Vector2();
-            var step = (float)Math.Sqrt(Vector2.Distance(cursor, end)) * 1.618f;
-            if (step > 275) step = 240;
+            var step = (float)Math.Log(Vector2.Distance(cursor, end)) * 10f;
             stepVector2.X = (end.X - cursor.X) / step;
             stepVector2.Y = (end.Y - cursor.Y) / step;
             float fX = cursor.X;
@@ -165,11 +164,10 @@ namespace QvinExp.Utils
 
         public static void SetCursorPosAndLeftClickHuman(Vector2 coords, int extraDelay)
         {
-
             SetCursorPosition(coords);
             Thread.Sleep(MOVEMENT_DELAY + extraDelay);
             LeftMouseDown();
-            Thread.Sleep(MOVEMENT_DELAY + extraDelay);
+            Thread.Sleep(CLICK_DELAY);
             LeftMouseUp();
 
         }

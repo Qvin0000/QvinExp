@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json;
 using PoeHUD.DebugPlug;
+using PoeHUD.Framework.Helpers;
 using PoeHUD.Models;
 using PoeHUD.Models.Enums;
 using PoeHUD.Plugins;
@@ -24,13 +27,13 @@ namespace QvinExp
     {
         private Vector2 _clickWindowOffset;
         private readonly bool _Debug = false;
-        private readonly bool _DebugInFile = true;
+        private readonly bool _DebugInFile = false;
         private int[,] _ignoredCells;
         private bool _Working;
         private readonly List<EntityWrapper> entities = new List<EntityWrapper>();
         private readonly int INPUT_DELAY = 15;
         private readonly int UPDATE_DELAY = 256;
-        private bool GemsOnOff = false; 
+
         public override void Initialise()
         {
             LoadIgnoredCells();
@@ -44,18 +47,18 @@ namespace QvinExp
                 if (_Working)
                     return;
                 _Working = true;
-                TestPickUp();
+                NewPickUp();
             }
 
-            if (GemsOnOff)
+            if (Keyboard.IsKeyDown((int)Keys.F2))
             {
-                if (Keyboard.IsKeyDown((int) Keys.F6))
-                {
-                    if (_Working)
-                        return;
-                    _Working = true;
-                    GetGems();
-                }
+
+                if (_Working)
+                    return;
+                _Working = true;
+                 ClickOnChests();
+              
+                
             }
 
             if (Keyboard.IsKeyDown((int) Keys.PageDown) && GameController.Game.IngameState.IngameUi.InventoryPanel
@@ -100,7 +103,9 @@ namespace QvinExp
                 if (_Working)
                     return;
                 _Working = true;
-                //SortItemsInStash();
+                if(Settings.NewSorting)
+                SortItems();
+                else
                 SortMapsMain();
                 return;
             }
@@ -123,21 +128,10 @@ namespace QvinExp
             entities.Remove(entityWrapper);
         }
 
-        private List<ItemData> GetItemsDataFromInventoryItems(List<NormalInventoryItem> items)
-        {
-            var itemDatas = new List<ItemData>();
-            foreach (var item in items)
-            {
-                if (item.Item == null)
-                    continue;
 
-                var baseItemType = GameController.Files.BaseItemTypes.Translate(item.Item.Path);
-                var testItem = new ItemData(item, baseItemType);
-                itemDatas.Add(testItem);
-            }
-            return itemDatas;
-        }
 
+
+        #region Old Function
 
         private void SellUnidenItemsFromInventory()
         {
@@ -219,48 +213,171 @@ namespace QvinExp
             _Working = false;
         }
 
-
-        private List<MapQ> SortMaps(List<NormalInventoryItem> items)
+        private void Get3Maps(int howMany = 48)
         {
-            var itemsData = GetItemsDataFromInventoryItemsForMap(items);
-            var maps = new List<MapQ>();
-            var allMaps = MapQ.Maps();
-            foreach (var itemData in itemsData)
+            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            var stashItems = stash.VisibleInventoryItems.ToList();
+            var sortedMaps = SortMaps(stashItems);
+            var grouped = sortedMaps.GroupBy(x => x.ItemData.BaseName);
+            var moreThan3Map = new List<ItemQ>();
+            foreach (var gr in grouped)
             {
-                var tier = 99;
-                if (allMaps.ContainsKey(itemData.BaseName))
-                    tier = allMaps[itemData.BaseName];
-                maps.Add(new MapQ(itemData.BaseName, tier, itemData));
+                if (gr.Count() < 3) continue;
+                var mapsCount = gr.Count();
+                var sellCount = (int)Math.Floor(mapsCount / 3.0) * 3;
+                var tempList = gr.ToList();
+                for (var i = 0; i < sellCount; i++)
+                    moreThan3Map.Add(tempList[i]);
             }
+            if (moreThan3Map.Count < 48)
+                howMany = moreThan3Map.Count;
+            for (var i = 0; i < howMany; i++)
+            {
+                var cellWOff = moreThan3Map[i].ItemData.GetClickPos() + _clickWindowOffset;
+                Keyboard.KeyDown(Keys.LControlKey);
+                Thread.Sleep(INPUT_DELAY);
+                Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
+                Thread.Sleep(INPUT_DELAY);
+                Keyboard.KeyUp(Keys.LControlKey);
+            }
+            _Working = false;
+        }
+        #endregion
 
-            var result = maps.OrderBy(x => x.Tier)
-                .ThenBy(y => y.Name)
+        #region Sort Function
+
+        private delegate List<ItemQ> SortMethod(List<NormalInventoryItem> items);
+        private List<ItemQ> MainSort()
+        {
+            SortMethod _sortMethod;
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            var stashItems = stash.VisibleInventoryItems;
+            _sortMethod = ChoiceSort(stashItems);
+            var items = _sortMethod(stashItems);
+            
+
+        //var SizeInv = (int)stash.SizeInv;
+            var SizeInv = FIXGetSizeInventory();
+            var z = 0;
+            for (int i = 0; i < SizeInv; i++)
+            {
+                for (int j = 0; j < SizeInv; j++)
+                {
+                    if (z < items.Count)
+                    {
+                        items[z].nX = i;
+                        items[z].nY = j;
+                        items[z].i = z;
+                        z++;
+                    }
+
+                }
+            }
+            return items;
+        }
+
+        private SortMethod ChoiceSort(List<NormalInventoryItem> items)
+        {
+
+            var result = new List<Tuple<int, SortMethod>>();
+            var ch = new List<Tuple<string[], SortMethod>>();
+            ch.Add(new Tuple<string[], SortMethod>(new []{ "maps", "Metadata/Items/Labyrinth/OfferingToTheGoddess" },SortMaps));
+            ch.Add(new Tuple<string[], SortMethod>(new []{ "gems"},SortGems));
+            ch.Add(new Tuple<string[], SortMethod>(new [] { "amulets", "rings", "amulet" },SortJewelery));
+            ch.Add(new Tuple<string[], SortMethod>(new []{ "jewels", },SortJewels));
+
+            foreach (var tuple in ch)
+            {
+                var sum = 0;
+                foreach (var s in tuple.Item1)
+                {
+                    sum += items.Count(x => x.Item.Path.ToLower().Contains(s.ToLower()));
+                }
+                result.Add(new Tuple<int, SortMethod>(sum,tuple.Item2));
+            }
+            var res = result.OrderByDescending(x => x.Item1).First();
+            return res.Item2;
+
+        }
+
+        private List<ItemQ> RandomSort(List<NormalInventoryItem> items)
+        {
+            Random rnd = new Random();
+            var itemsData = GetItemsDataFromInventoryItems(items);
+            var itemsQ = (from itemData in itemsData
+                let tier = rnd.Next(1, 100)
+                select new ItemQ(tier, itemData)).ToList();
+            var result = itemsQ.OrderBy(x => x.Tier)
+                .ToList();
+            return result;
+
+
+        }
+        private List<ItemQ> SortMaps(List<NormalInventoryItem> items)
+        {
+            var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("maps") ||
+                                              x.Item.Path.Contains("Metadata/Items/Labyrinth/OfferingToTheGoddess"))
+                .ToList();
+            var itemsData = GetItemsDataFromInventoryItems(tempItems);
+            var itemsQ = (from iD in itemsData
+                let tier = iD._inventoryItem.Item.GetComponent<Map>().Tier
+                select new ItemQ(tier, iD)).ToList();
+
+            var result = itemsQ.OrderBy(x => x.Tier)
+                .ThenBy(y => y.ItemData.BaseName)
                 .ThenBy(u => u.ItemData.Rarity)
-                .ThenBy(q => q.ItemData._inventoryItem.InventPosX)
                 .ToList();
             return result;
         }
 
-        private List<MapQ> SortMapsNew(List<NormalInventoryItem> items)
+        private List<ItemQ> SortGems(List<NormalInventoryItem> items)
         {
-            var itemsData = GetItemsDataFromInventoryItemsForMap(items);
-            var maps = new List<MapQ>();
-            var allMaps = MapQ.Maps();
-            foreach (var itemData in itemsData)
-            {
-                var tier = 99;
-                tier = itemData._inventoryItem.Item.GetComponent<Map>().Tier;
-                maps.Add(new MapQ(itemData.BaseName, tier, itemData));
-            }
-
-            var result = maps.OrderBy(x => x.Tier)
-                .ThenBy(y => y.Name)
-                .ThenBy(u => u.ItemData.Rarity)
-                .ThenBy(q => q.ItemData._inventoryItem.InventPosX)
+          
+            var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("Gems".ToLower()))
                 .ToList();
+            
+            var itemsData = GetItemsDataFromInventoryItems(tempItems);
+
+            var itemsQ = (from iD in itemsData select new ItemQ(iD));
+            var result = itemsQ.OrderBy(x => x.ItemData.ItemQuality).ThenBy(x=>x.ItemData.BaseName).ToList();
             return result;
         }
-       
+
+
+        private List<ItemQ> SortJewelery(List<NormalInventoryItem> items)
+        {
+          
+            var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("rings") ||
+                                             x.Item.Path.ToLower().Contains("amulet") ||
+                                             x.Item.Path.ToLower().Contains("amulets")).ToList();
+            var itemsData = GetItemsDataFromInventoryItems(tempItems);
+            var itemsQ = from iD in itemsData select new ItemQ(iD);
+            var result = itemsQ.OrderBy(x => x.ItemData.ClassName)
+                .ThenBy(x => x.ItemData.BaseName)
+                .ThenBy(x=>x.ItemData.Path)
+                .ThenBy(x => x.ItemData.Rarity)
+                .ThenBy(x => x.ItemData.ItemLevel)
+                .ThenBy(x=>x.ItemData.BIdentified).ToList();
+            return result;
+        }
+
+        private List<ItemQ> SortJewels(List<NormalInventoryItem> items)
+        {
+            
+            var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("jewels")
+                                           ).ToList();
+            var itemsData = GetItemsDataFromInventoryItems(tempItems);
+            var itemsQ = from iD in itemsData select new ItemQ(iD);
+            var rarityJewels = itemsQ.Where(x => x.ItemData.Rarity != ItemRarity.Unique).OrderBy(x => x.ItemData.Rarity).ThenBy(x => x.ItemData.BaseName).ToList();
+            var uniqueJewels = itemsQ.Where(x => x.ItemData.Rarity == ItemRarity.Unique).OrderBy(x => x.ItemData.BaseName).ThenBy(x => x.ItemData.ClassName).ToList();
+            rarityJewels.AddRange(uniqueJewels);
+            return rarityJewels;
+        }
+        #endregion
+
+
+
         private bool CheckIgnoreCells(NormalInventoryItem inventItem)
         {
             var inventPosX = inventItem.InventPosX;
@@ -321,65 +438,7 @@ namespace QvinExp
             defaultSettings = defaultSettings.Replace("]]", "]\n]");
             File.WriteAllText(filePath, defaultSettings);
         }
-
-        private List<ItemData> GetItemsDataFromInventoryItemsForMap(List<NormalInventoryItem> items)
-        {
-            var itemDatas = new List<ItemData>();
-            foreach (var item in items)
-            {
-                if (item.Item == null)
-                    continue;
-
-
-                if (!item.Item.Path.ToLower().Contains("maps") &&
-                    !item.Item.Path.Contains("Metadata/Items/Labyrinth/OfferingToTheGoddess")) continue;
-                var baseItemType = GameController.Files.BaseItemTypes.Translate(item.Item.Path);
-                var testItem = new ItemData(item, baseItemType);
-                itemDatas.Add(testItem);
-            }
-            return itemDatas;
-        }
-
-        private Vector2 GetInventoryClickPosByCellIndex(Inventory inventory, int indexX, int indexY, float cellSize)
-        {
-            var rectInv = inventory.InventoryUiElement.GetClientRect();
-            cellSize = rectInv.Width / 12;
-            if(inventory.InvType == InventoryType.QuadStash)
-                cellSize = rectInv.Width / 24;
-            return rectInv.TopLeft +
-                   new Vector2(cellSize * (indexX + 0.5f), cellSize * (indexY + 0.5f));
-        }
-
-        private void Get3Maps(int howMany = 48)
-        {
-            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
-            var stashItems = stash.VisibleInventoryItems.ToList();
-            var sortedMaps = SortMaps(stashItems);
-            var grouped = sortedMaps.GroupBy(x => x.Name);
-            var moreThan3Map = new List<MapQ>();
-            foreach (var gr in grouped)
-            {
-                if (gr.Count() < 3) continue;
-                var mapsCount = gr.Count();
-                var sellCount = (int) Math.Floor(mapsCount / 3.0) * 3;
-                var tempList = gr.ToList();
-                for (var i = 0; i < sellCount; i++)
-                    moreThan3Map.Add(tempList[i]);
-            }
-            if (moreThan3Map.Count < 48)
-                howMany = moreThan3Map.Count;
-            for (var i = 0; i < howMany; i++)
-            {
-                var cellWOff = moreThan3Map[i].ItemData.GetClickPos() + _clickWindowOffset;
-                Keyboard.KeyDown(Keys.LControlKey);
-                Thread.Sleep(INPUT_DELAY);
-                Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
-                Thread.Sleep(INPUT_DELAY);
-                Keyboard.KeyUp(Keys.LControlKey);
-            }
-            _Working = false;
-        }
+       
 
         #region Debug
 
@@ -388,92 +447,83 @@ namespace QvinExp
             if (_Debug)
             {
                 DebugPlugin.LogMsg(message, time);
-                if (_DebugInFile)
                     File.AppendAllText("Debug.txt", message + Environment.NewLine);
             }
         }
 
+        private void DebugObject(object obj)
+        {
+            if (!_Debug) return;
+            var maxDepth = 4;
+            var split = 50;
+            var flags = BindingFlags.Public | BindingFlags.Instance;
+            var depth = 0;
+            var debugOutput = new StringBuilder();
+            void Recur(object o, ref StringBuilder str)
+            {
+                var oProp = o.GetType().GetProperties(flags).Where(x => x.GetIndexParameters().Length == 0);
+                var notPrimitive = new List<Tuple<string, object>>();
+                var space = new string(' ', 4 * depth);
+                str.AppendLine(space + "Class Name: " +o.GetType().Name);
+                foreach (var propertyInfo in oProp)
+                    if (propertyInfo.GetValue(o, null).GetType().IsPrimitive ||
+                        propertyInfo.GetValue(o, null) is decimal ||
+                        propertyInfo.GetValue(o, null) is string ||
+                        propertyInfo.GetValue(o, null) is TimeSpan
+                    )
+                        str.AppendLine(space + propertyInfo.Name + ": " + propertyInfo.GetValue(o, null));
+                    else
+                    {
+                        notPrimitive.Add(
+                            new Tuple<string, object>(propertyInfo.ToString(), propertyInfo.GetValue(o, null)));
+                    }
+                foreach (var o1 in notPrimitive)
+                {
+                    depth++;
+                    if (depth >= maxDepth) return;
+                    space = new string(' ', 4 * depth+2);
+                    str.AppendLine(space + o1.Item1 + ": " + o1.Item2);
+                    Recur(o1.Item2, ref str);
+                }
+            }
+
+            
+                
+                debugOutput.AppendLine(new string('-', split));
+                Recur(obj, ref debugOutput);
+                debugOutput.AppendLine(new string('-', split));
+                File.AppendAllText("DebugOject.txt", debugOutput.ToString());
+            
+           
+        }
+
+        private void DebugObject(IEnumerable<object> listObjects)
+        {
+            if (_Debug)
+            {
+                foreach (var o in listObjects)
+                {
+                   DebugObject(o);
+
+                }
+            }
+        }
         #endregion
 
-        #region NewSortMethod
+        #region SortMethodV3
 
-        public void ClickOnMap(MapQ map)
-        {
-            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            var cellWOff = map.ItemData.GetClickPos() + _clickWindowOffset;
-            Keyboard.KeyDown(Keys.LControlKey);
-            Thread.Sleep(INPUT_DELAY);
-            Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
-            Thread.Sleep(INPUT_DELAY);
-            Keyboard.KeyUp(Keys.LControlKey);
-        }
+        
 
-
-        public void ClickOnItem(NormalInventoryItem item)
-        {
-            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            var cellWOff = item.GetClientRect().Center + _clickWindowOffset;
-            Keyboard.KeyDown(Keys.LControlKey);
-            Thread.Sleep(INPUT_DELAY);
-            Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
-            Thread.Sleep(INPUT_DELAY);
-            Keyboard.KeyUp(Keys.LControlKey);
-        }
-
-        private void ClickOnItemData(ItemData item)
-        {
-            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            if (item == null) return;
-            var cellWOff = item.GetClickPos() + _clickWindowOffset;
-            Keyboard.KeyDown(Keys.LControlKey);
-            Thread.Sleep(INPUT_DELAY);
-            Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
-            Thread.Sleep(INPUT_DELAY);
-            Keyboard.KeyUp(Keys.LControlKey);
-        }
-
-        public void ClickOnMaps(IEnumerable<MapQ> maps)
-        {
-            foreach (var map in maps)
-            {
-                if (map == null) continue;
-                ClickOnMap(map);
-            }
-        }
-
-        public void ClickOnItems(IEnumerable<NormalInventoryItem> items)
-        {
-            foreach (var item in items)
-            {
-                if (item == null) continue;
-                ClickOnItem(item);
-            }
-        }
-        private void ClickOnItemsData(List<ItemData> itemsData)
-        {
-            
-            foreach (var item in itemsData)
-            {
-                ClickOnItemData(item);
-            }
-        }
-
-        public void ClickOnMaps(IEnumerable<NormalInventoryItem> items)
-        {
-            foreach (var item in items)
-            {
-                if (item == null) continue;
-                ClickOnItem(item);
-            }
-        }
-
+       
+    
+        //Deprecated
         public List<NormalInventoryItem> SortMapsByInvPosition(IEnumerable<NormalInventoryItem> items)
         {
             var result = items.OrderBy(x => x.InventPosX).ThenBy(x => x.InventPosY).ToList();
             return result;
         }
 
-
+        //Deprecated
         public void SortMapsMain()
         {
             var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
@@ -485,9 +535,9 @@ namespace QvinExp
             for (var i = 0; i < iMax; i++)
             {
                 var cacheItems = stash.VisibleInventoryItems.ToList();
-                var sortedMaps = SortMapsNew(cacheItems);
+                var sortedMaps = SortMaps(cacheItems);
                 var finalSorted = sortedMaps.Skip(i * sizeSortingHalf).Take(sizeSortingHalf).ToList();
-                ClickOnMaps(finalSorted);
+                ClickOnItems(finalSorted);
                 var sortedMapsByInvPosition = SortMapsByInvPosition(cacheItems)
                     .Skip(i * sizeSortingHalf)
                     .Take(sizeSortingHalf)
@@ -495,10 +545,10 @@ namespace QvinExp
                 Thread.Sleep((int) (UPDATE_DELAY * 1.5));
                 var sortedMapsByInvPosition2 = SortMapsByInvPosition(stash.VisibleInventoryItems.ToList()).ToList();
                 var Interct = sortedMapsByInvPosition2.Intersect(sortedMapsByInvPosition);
-                ClickOnMaps(Interct);
+                ClickOnItems(Interct);
                 Thread.Sleep(UPDATE_DELAY);
-                var sortedMapsFromInventory = SortMapsNew(inventory.VisibleInventoryItems.ToList());
-                ClickOnMaps(sortedMapsFromInventory);
+                var sortedMapsFromInventory = SortMaps(inventory.VisibleInventoryItems.ToList());
+                ClickOnItems(sortedMapsFromInventory);
                 Thread.Sleep(UPDATE_DELAY);
             }
             _Working = false;
@@ -506,13 +556,11 @@ namespace QvinExp
 
         #endregion
 
-        #region pickup
+        #region Pick up items and click on chest
 
         private readonly Stopwatch pickUpTimer = Stopwatch.StartNew();
 
-        private readonly List<Tuple<int, long, EntityWrapper>> SortedByDistDropItems =
-            new List<Tuple<int, long, EntityWrapper>>();
-
+        //Deprecated
         private void TestPickUp()
         {
             if (pickUpTimer.ElapsedMilliseconds < 100)
@@ -521,7 +569,7 @@ namespace QvinExp
                 return;
             }
             pickUpTimer.Restart();
-            SortedByDistDropItems.Clear();
+            var sortedByDistDropItems = new List<Tuple<int, long, EntityWrapper>>();
 
 
             foreach (var entity in entities)
@@ -531,30 +579,31 @@ namespace QvinExp
                     item = entity.GetComponent<WorldItem>().ItemEntity;
 
                 if (item == null) continue;
+           
                 var en = item.Path.ToLower();
                 var skip = false || en.Contains("currencyidentification") || en.Contains("CurrencyRerollMagicShard".ToLower()) || en.Contains("CurrencyUpgradeToMagicShard".ToLower());
                 if (skip) continue;
                 var d = GetEntityDistance(entity);
                 var t = new Tuple<int, long, EntityWrapper>(d, entity.Address, entity);
-                SortedByDistDropItems.Add(t);
+                sortedByDistDropItems.Add(t);
             }
 
 
-            var OrderedByDistance = SortedByDistDropItems.OrderBy(x => x.Item1).ToList();
+            var orderedByDistance = sortedByDistDropItems.OrderBy(x => x.Item1).ToList();
 
-            var OrderedButOnlyCurrencyAndMap = OrderedByDistance.Where(
+            var orderedButOnlyCurrencyAndMap = orderedByDistance.Where(
                 x => (x.Item3.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("currency") ||
                       x.Item3.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("map") || x.Item3
                           .GetComponent<WorldItem>()
                           .ItemEntity.Path.ToLower()
                           .Contains("divinationcards")) && x.Item1 < 500);
 
-
-            var tempList = OrderedButOnlyCurrencyAndMap.Concat(OrderedByDistance.Except(OrderedButOnlyCurrencyAndMap))
+            
+            var tempList = orderedButOnlyCurrencyAndMap.Concat(orderedByDistance.Except(orderedButOnlyCurrencyAndMap))
                 .ToList();
 
 
-            var _currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
+            var currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
                 .GroupBy(y => y.ItemOnGround.Address)
                 .ToDictionary(y => y.Key, y => y.First());
             ItemsOnGroundLabelElement entityLabel;
@@ -564,9 +613,12 @@ namespace QvinExp
                 _Working = false;
                 return;
             }
-
+       
+            
             foreach (var tuple in tempList)
-                if (_currentLabels.TryGetValue(tuple.Item2, out entityLabel))
+                if (currentLabels.TryGetValue(tuple.Item2, out entityLabel))
+                {
+                 
                     if (entityLabel.IsVisible)
                     {
                         var rect = entityLabel.Label.GetClientRect();
@@ -589,14 +641,325 @@ namespace QvinExp
                             return;
                         }
 
-                        SetCursorToEntityAndClick(vect);
+                        _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+                        Mouse.SetCursorPosAndLeftClick(vect + _clickWindowOffset, Settings.ExtraDelay);
                         break;
                     }
+                }
 
 
             _Working = false;
         }
 
+
+        private Vector2 _clicked;
+        private void NewPickUp()
+        {
+           
+            List<Tuple<int, ItemsOnGroundLabelElement>> listPickUp = new List<Tuple<int, ItemsOnGroundLabelElement>>();
+            if (pickUpTimer.ElapsedMilliseconds < 100)
+            {
+                _Working = false;
+                return;
+            }
+            pickUpTimer.Restart();
+           var _currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels.Where(x=>x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp).ToList();
+            foreach (var label in _currentLabels)
+            {
+                
+                var dist = GetEntityDistance(label.ItemOnGround);
+                listPickUp.Add(new Tuple<int, ItemsOnGroundLabelElement>(dist,label));
+            }
+          
+            var ordByDist = listPickUp.OrderBy(x => x.Item1);
+            var mapCurAndCard = ordByDist.Where(
+                x => (x.Item2.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("currency") ||
+                      x.Item2.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("map") || x
+                          .Item2.ItemOnGround
+                          .GetComponent<WorldItem>()
+                          .ItemEntity.Path.ToLower()
+                          .Contains("divinationcards")) && x.Item1 < 500);
+            var pickUpThisItem = mapCurAndCard.Any() ? mapCurAndCard.FirstOrDefault() : ordByDist.FirstOrDefault();
+            if (pickUpThisItem != null)
+            {
+                    var rect = pickUpThisItem.Item2.Label.GetClientRect();
+                    var vect = new Vector2(rect.Center.X, rect.Center.Y);
+                    if (pickUpThisItem.Item1 >= 750)
+                    {
+                        _Working = false;
+                        return;
+                    }
+                    Thread.Sleep(5);
+                    var vectWindow = GameController.Window.GetWindowRectangle();
+                    if (vect.Y > vectWindow.Bottom || vect.Y < vectWindow.Top)
+                    {
+                        _Working = false;
+                        return;
+                    }
+                    if (vect.X > vectWindow.Right || vect.X < vectWindow.Left)
+                    {
+                        _Working = false;
+                        return;
+                    }
+                    if (_clicked != vect)
+                    {
+                        _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+                        Mouse.SetCursorPosAndLeftClick(vect+_clickWindowOffset,Settings.ExtraDelay);
+                        _clicked = vect;
+                    }
+                
+            }
+            _Working = false;
+
+        }
+
+
+         
+        private void ClickOnChests()
+        {
+            var sortedByDistChest = new List<Tuple<int, long, EntityWrapper>>();
+
+            foreach (var entity in entities)
+            {
+                if (entity.Path.ToLower().Contains("chests") && entity.IsAlive && entity.IsHostile)
+                {
+                    if (!entity.HasComponent<Chest>()) continue;
+                    var ch = entity.GetComponent<Chest>();
+                    if (ch.IsStrongbox) continue;
+                    if (ch.IsOpened) continue;
+                    var d = GetEntityDistance(entity);
+
+                    var t = new Tuple<int, long, EntityWrapper>(d, entity.Address, entity);
+                    if (sortedByDistChest.Any(x => x.Item2 == entity.Address)) continue;
+
+                    sortedByDistChest.Add(t);
+                }
+            }
+
+            var tempList = sortedByDistChest.OrderBy(x => x.Item1).ToList();
+
+            if (Keyboard.IsKeyDown((int)Keys.F2))
+            {
+                if (tempList.Count <= 0) return;
+                if (tempList[0].Item1 >= 700) return;
+                SetCursorToEntityAndClick(tempList[0].Item3);
+            }
+
+            _Working = false;
+
+        }
+        //Copy-Paste - Sithylis_QoL
+        private void SetCursorToEntityAndClick(EntityWrapper entity)
+        {
+            var camera = GameController.Game.IngameState.Camera;
+            var chestScreenCoords =
+                camera.WorldToScreen(entity.Pos.Translate(0, 0, 0), entity);
+            if (chestScreenCoords != new Vector2())
+            {
+                var pos = Mouse.GetCursorPosition();
+                var iconRect1 = new Vector2(chestScreenCoords.X, chestScreenCoords.Y);
+                Mouse.SetCursorPosAndLeftClick(iconRect1, 100);
+                Mouse.SetCursorPos(pos.X, pos.Y);
+
+            }
+        }
+
+        #endregion
+
+
+
+        #region SortMethodV4
+        
+        private void SortItems()
+        {
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            var items = MainSort();
+            Action<Vector2, int> ClickMethod;
+            if (Settings.SortLikeHuman)
+                ClickMethod = Mouse.SetCursorPosAndLeftClickHuman;
+            else
+                ClickMethod = Mouse.SetCursorPosAndLeftClick;
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                if (stash.Address != GameController.Game.IngameState.ServerData.StashPanel.VisibleStash.Address)
+                {
+                    _Working = false;
+                    return;
+                }
+                if (item.nX == item.oX && item.nY == item.oY) continue;
+                if (item.nX <0 || item.nY <0 || item.i<0 ) continue;
+                var newVect = GetInventoryClickPosByCellIndex(stash, item.nX, item.nY);
+                var oldVect = GetInventoryClickPosByCellIndex(stash, item.oX, item.oY);
+                ClickOnItem(oldVect,newVect, ClickMethod);
+                var movedItem = items.Where(x => x.oX == item.nX && x.oY == item.nY).ToList();
+                if (movedItem.Any())
+                {
+                  var movedItemInList =  items[movedItem.First().i];
+                    movedItemInList.oX = item.oX;
+                    movedItemInList.oY = item.oY;
+                }
+                item.oX = item.nX;
+                item.oY = item.nY;
+                
+            }
+            Thread.Sleep(250);
+            //This fix for item on cursor
+            while (FIXGetHoldItemStatus() > 0)
+            {
+                Thread.Sleep(250);
+                var xyFree = GetFirstFreeSpace();
+                if (xyFree != null)
+                {
+                    var fixVect = GetInventoryClickPosByCellIndex(stash, (int) xyFree.Value.X, (int) xyFree.Value.Y);
+                    ClickOnItem(fixVect, ClickMethod);
+                }
+            }
+            _Working = false;
+          
+           
+          
+
+        }
+
+        #endregion
+
+        #region Usefull function
+
+        public void ClickOnItem(Vector2 vector, Action<Vector2, int> _click)
+        {
+            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+            _click?.Invoke(vector+_clickWindowOffset,Settings.ExtraDelay);
+        }
+
+        public void ClickOnItemWShift(NormalInventoryItem item)
+        {
+            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+            var cellWOff = item.GetClientRect().Center + _clickWindowOffset;
+            Keyboard.KeyDown(Keys.LControlKey);
+            Thread.Sleep(INPUT_DELAY);
+            Mouse.SetCursorPosAndLeftClick(cellWOff, Settings.ExtraDelay);
+            Thread.Sleep(INPUT_DELAY);
+            Keyboard.KeyUp(Keys.LControlKey);
+        }
+        public void ClickOnItemWShift(ItemQ item)
+        {
+            ClickOnItemWShift(item.ItemData);
+        }
+       
+
+        private void ClickOnItemWShift(ItemData item)
+        {
+            ClickOnItemWShift(item._inventoryItem);
+        }
+        private void ClickOnItem(Vector2 oldPosition, Vector2 newPosition, Action<Vector2, int> _click)
+        {
+
+            if (_click == null) return;
+            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+            _click(oldPosition + _clickWindowOffset, Settings.ExtraDelay);
+            Thread.Sleep(INPUT_DELAY);
+            _click(newPosition + _clickWindowOffset, Settings.ExtraDelay);
+            Thread.Sleep(INPUT_DELAY);
+            _click(oldPosition + _clickWindowOffset, Settings.ExtraDelay);
+        }
+
+
+
+        private void ClickOnItem(ItemData item, Vector2 newPosition, Action<Vector2, int> _click)
+        {
+            ClickOnItem(item.GetClickPos(), newPosition, _click);
+        }
+        private void ClickOnItem(ItemQ item, Vector2 newPosition, Action<Vector2, int> _click)
+        {
+            ClickOnItem(item.ItemData.GetClickPos(), newPosition, _click);
+        }
+        public void ClickOnItems(IEnumerable<ItemQ> items)
+        {
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                ClickOnItemWShift(item);
+            }
+        }
+
+        public void ClickOnItems(IEnumerable<NormalInventoryItem> items)
+        {
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                ClickOnItemWShift(item);
+            }
+        }
+        private void ClickOnItems(IEnumerable<ItemData> itemsData)
+        {
+
+            foreach (var item in itemsData)
+            {
+                ClickOnItemWShift(item);
+            }
+        }
+        private Vector2? GetFirstFreeSpace()
+        {
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            var items = stash.VisibleInventoryItems;
+            var type = stash.InvType;
+            bool[,] stsh;
+            //Temp fix
+          /*  if (type == InventoryType.QuadStash)
+            {
+                stsh = new bool[24, 24];
+            }*/
+            if (FIXGetSizeInventory() == 24)
+                stsh = new bool[24, 24];
+            else
+                stsh = new bool[12, 12];
+            var xMax = stsh.GetUpperBound(0);
+            var yMax = stsh.GetUpperBound(1);
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                var baseItem = GameController.Files.BaseItemTypes.Translate(item.Item.Path);
+                if(baseItem==null) continue;
+                for (var i = 0; i < baseItem.Width; i++)
+                for (var j = 0; j < baseItem.Height; j++)
+                    stsh[item.InventPosX + i, item.InventPosY + j] = true;
+            }
+
+           
+            for (var i = 0; i < xMax; i++)
+            for (var j = 0; j < yMax; j++)
+                if (!stsh[i, j]) return new Vector2(i, j);
+
+            return null;
+        }
+        private List<ItemData> GetItemsDataFromInventoryItems(List<NormalInventoryItem> items)
+        {
+            var itemDatas = new List<ItemData>();
+            foreach (var item in items)
+            {
+                if (item.Item == null)
+                    continue;
+
+                var baseItemType = GameController.Files.BaseItemTypes.Translate(item.Item.Path);
+                var testItem = new ItemData(item, baseItemType);
+                itemDatas.Add(testItem);
+            }
+            return itemDatas;
+        }
+        
+       
+        private Vector2 GetInventoryClickPosByCellIndex(Inventory inventory, int indexX, int indexY)
+        {
+            var rectInv = inventory.InventoryUiElement.GetClientRect();
+            var cellSize = rectInv.Width / 12;
+            //Temp fix
+           // if (inventory.InvType == InventoryType.QuadStash)
+           if(FIXGetSizeInventory()==24)
+                cellSize = rectInv.Width / 24;
+            return rectInv.TopLeft +
+                   new Vector2(cellSize * (indexX + 0.5f), cellSize * (indexY + 0.5f));
+        }
         private int GetEntityDistance(EntityWrapper entity)
         {
             var PlayerPosition = GameController.Player.GetComponent<Positioned>();
@@ -604,43 +967,34 @@ namespace QvinExp
             var distanceToEntity = Math.Sqrt(Math.Pow(PlayerPosition.X - MonsterPosition.X, 2) +
                                              Math.Pow(PlayerPosition.Y - MonsterPosition.Y, 2));
 
-            return (int) distanceToEntity;
+            return (int)distanceToEntity;
         }
-
-        private void SetCursorToEntityAndClick(Vector2 rect)
+        private int GetEntityDistance(Entity entity)
         {
-            var _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            var finalRect = rect + _clickWindowOffset;
-            Mouse.SetCursorPosAndLeftClick(finalRect, 30);
-        }
+            var PlayerPosition = GameController.Player.GetComponent<Positioned>();
+            var MonsterPosition = entity.GetComponent<Positioned>();
+            var distanceToEntity = Math.Sqrt(Math.Pow(PlayerPosition.X - MonsterPosition.X, 2) +
+                                             Math.Pow(PlayerPosition.Y - MonsterPosition.Y, 2));
 
+            return (int)distanceToEntity;
+        }
         #endregion
 
-        #region Gems?
-        private void GetGems()
-        {
-            _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
-            var itemsData = GetItemsDataFromInventoryItems(stash.VisibleInventoryItems);
-            /*
-            var activeSkillGems = itemsData.Where(x => x.ClassName.ToLower().Contains("Active Skill Gem".ToLower()));
-            var supportSkillGems = itemsData.Where(x => x.ClassName.ToLower().Contains("Support Skill Gem".ToLower()));
-            var activeSorted = activeSkillGems.OrderBy(x => x.ItemQuality).ToList();
-            var supportSorted = supportSkillGems.OrderBy(x => x.ItemQuality).ToList();
-            */
+        #region TempFix
 
-            /*
-            List<ItemData> final = new List<ItemData>();
-            
-            final.AddRange(activeSorted);
-            final.AddRange(supportSorted);
-            */
-            var skillGems = itemsData.Where(x => x.ClassName.ToLower().Contains("Skill Gem".ToLower()));
-            var final = skillGems.OrderBy(x => x.ItemQuality).ToList();
-            final = final.Take(50).ToList();
-            ClickOnItemsData(final);
-            _Working = false;
+        private long FIXGetSizeInventory()
+        {
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            return Memory.ReadLong(stash.Address + 0x410, 0x630, 0x20); // Normal stash - 12, Quad - 24, Other 4 || 0
         }
+
+
+        private int FIXGetHoldItemStatus()
+        {
+            var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
+            return  Memory.ReadInt(stash.Address + 0x410, 0x658); //0- No hold item 1 - FreeSpace, 2 - ReplaceItem
+    }
+       
         #endregion
     }
 }
