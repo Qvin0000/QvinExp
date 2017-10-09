@@ -537,7 +537,7 @@ namespace QvinExp
                 var cacheItems = stash.VisibleInventoryItems.ToList();
                 var sortedMaps = SortMaps(cacheItems);
                 var finalSorted = sortedMaps.Skip(i * sizeSortingHalf).Take(sizeSortingHalf).ToList();
-                ClickOnItems(finalSorted);
+                ClickOnItemsWShift(finalSorted);
                 var sortedMapsByInvPosition = SortMapsByInvPosition(cacheItems)
                     .Skip(i * sizeSortingHalf)
                     .Take(sizeSortingHalf)
@@ -545,10 +545,10 @@ namespace QvinExp
                 Thread.Sleep((int) (UPDATE_DELAY * 1.5));
                 var sortedMapsByInvPosition2 = SortMapsByInvPosition(stash.VisibleInventoryItems.ToList()).ToList();
                 var Interct = sortedMapsByInvPosition2.Intersect(sortedMapsByInvPosition);
-                ClickOnItems(Interct);
+                ClickOnItemsWShift(Interct);
                 Thread.Sleep(UPDATE_DELAY);
                 var sortedMapsFromInventory = SortMaps(inventory.VisibleInventoryItems.ToList());
-                ClickOnItems(sortedMapsFromInventory);
+                ClickOnItemsWShift(sortedMapsFromInventory);
                 Thread.Sleep(UPDATE_DELAY);
             }
             _Working = false;
@@ -652,25 +652,24 @@ namespace QvinExp
         }
 
 
-        private Vector2 _clicked;
         private void NewPickUp()
         {
-           
-            List<Tuple<int, ItemsOnGroundLabelElement>> listPickUp = new List<Tuple<int, ItemsOnGroundLabelElement>>();
+            var listPickUp = new List<Tuple<int, ItemsOnGroundLabelElement>>();
             if (pickUpTimer.ElapsedMilliseconds < 100)
             {
                 _Working = false;
                 return;
             }
             pickUpTimer.Restart();
-           var _currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels.Where(x=>x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp).ToList();
+            var _currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
+                .Where(x => x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp)
+                .ToList();
             foreach (var label in _currentLabels)
             {
-                
                 var dist = GetEntityDistance(label.ItemOnGround);
-                listPickUp.Add(new Tuple<int, ItemsOnGroundLabelElement>(dist,label));
+                listPickUp.Add(new Tuple<int, ItemsOnGroundLabelElement>(dist, label));
             }
-          
+
             var ordByDist = listPickUp.OrderBy(x => x.Item1);
             var mapCurAndCard = ordByDist.Where(
                 x => (x.Item2.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("currency") ||
@@ -680,37 +679,40 @@ namespace QvinExp
                           .ItemEntity.Path.ToLower()
                           .Contains("divinationcards")) && x.Item1 < 500);
             var pickUpThisItem = mapCurAndCard.Any() ? mapCurAndCard.FirstOrDefault() : ordByDist.FirstOrDefault();
+
             if (pickUpThisItem != null)
             {
-                    var rect = pickUpThisItem.Item2.Label.GetClientRect();
-                    var vect = new Vector2(rect.Center.X, rect.Center.Y);
-                    if (pickUpThisItem.Item1 >= 750)
-                    {
-                        _Working = false;
-                        return;
-                    }
-                    Thread.Sleep(5);
-                    var vectWindow = GameController.Window.GetWindowRectangle();
-                    if (vect.Y > vectWindow.Bottom || vect.Y < vectWindow.Top)
-                    {
-                        _Working = false;
-                        return;
-                    }
-                    if (vect.X > vectWindow.Right || vect.X < vectWindow.Left)
-                    {
-                        _Working = false;
-                        return;
-                    }
-                    if (_clicked != vect)
-                    {
-                        _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-                        Mouse.SetCursorPosAndLeftClick(vect+_clickWindowOffset,Settings.ExtraDelay);
-                        _clicked = vect;
-                    }
-                
+                if (pickUpThisItem.Item1 >= 750)
+                {
+                    ClickOnChests();
+                    _Working = false;
+                    return;
+                }
+
+                Thread.Sleep(5);
+                var rect = pickUpThisItem.Item2.Label.GetClientRect();
+                var vect = new Vector2(rect.Center.X, rect.Center.Y);
+                var vectWindow = GameController.Window.GetWindowRectangle();
+                if (vect.Y > vectWindow.Bottom || vect.Y < vectWindow.Top)
+                {
+                    _Working = false;
+                    return;
+                }
+                if (vect.X > vectWindow.Right || vect.X < vectWindow.Left)
+                {
+                    _Working = false;
+                    return;
+                }
+                _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+                Mouse.SetCursorPosAndLeftClick(vect + _clickWindowOffset, Settings.ExtraDelay);
+                var centerScreen = GameController.Window.GetWindowRectangle().Center;
+                Mouse.SetCursorPos(centerScreen);
+            }
+            else
+            {
+                ClickOnChests();
             }
             _Working = false;
-
         }
 
 
@@ -718,7 +720,7 @@ namespace QvinExp
         private void ClickOnChests()
         {
             var sortedByDistChest = new List<Tuple<int, long, EntityWrapper>>();
-
+           
             foreach (var entity in entities)
             {
                 if (entity.Path.ToLower().Contains("chests") && entity.IsAlive && entity.IsHostile)
@@ -737,13 +739,11 @@ namespace QvinExp
             }
 
             var tempList = sortedByDistChest.OrderBy(x => x.Item1).ToList();
-
-            if (Keyboard.IsKeyDown((int)Keys.F2))
-            {
-                if (tempList.Count <= 0) return;
+            if (tempList.Count <= 0) return;
                 if (tempList[0].Item1 >= 700) return;
                 SetCursorToEntityAndClick(tempList[0].Item3);
-            }
+            var centerScreen = GameController.Window.GetWindowRectangle().Center;
+            Mouse.SetCursorPos(centerScreen);
 
             _Working = false;
 
@@ -874,7 +874,7 @@ namespace QvinExp
         {
             ClickOnItem(item.ItemData.GetClickPos(), newPosition, _click);
         }
-        public void ClickOnItems(IEnumerable<ItemQ> items)
+        public void ClickOnItemsWShift(IEnumerable<ItemQ> items)
         {
             foreach (var item in items)
             {
@@ -883,7 +883,7 @@ namespace QvinExp
             }
         }
 
-        public void ClickOnItems(IEnumerable<NormalInventoryItem> items)
+        public void ClickOnItemsWShift(IEnumerable<NormalInventoryItem> items)
         {
             foreach (var item in items)
             {
@@ -891,7 +891,7 @@ namespace QvinExp
                 ClickOnItemWShift(item);
             }
         }
-        private void ClickOnItems(IEnumerable<ItemData> itemsData)
+        private void ClickOnItemsWShift(IEnumerable<ItemData> itemsData)
         {
 
             foreach (var item in itemsData)
