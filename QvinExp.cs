@@ -33,7 +33,8 @@ namespace QvinExp
         private readonly int INPUT_DELAY = 15;
         private readonly int UPDATE_DELAY = 256;
         private readonly int PIXEL_BORDER = 3;
-
+        private readonly Stopwatch pickUpTimer = Stopwatch.StartNew();
+        private readonly Stopwatch cacheTimer = Stopwatch.StartNew();
         public override void Initialise()
         {
             LoadIgnoredCells();
@@ -42,6 +43,10 @@ namespace QvinExp
 
         public override void Render()
         {
+            if (Settings.fps.Value > 0)
+            {
+                Thread.Sleep(1000 / Settings.fps.Value);
+            } 
             if (Keyboard.IsKeyDown((int) Keys.F1))
             {
                 if (_Working)
@@ -454,7 +459,7 @@ namespace QvinExp
         private void DebugObject(object obj)
         {
             if (!_Debug) return;
-            var maxDepth = 4;
+            var maxDepth = 3;
             var split = 50;
             var flags = BindingFlags.Public | BindingFlags.Instance;
             var depth = 0;
@@ -485,10 +490,7 @@ namespace QvinExp
                     str.AppendLine(space + o1.Item1 + ": " + o1.Item2);
                     Recur(o1.Item2, ref str);
                 }
-            }
-
-            
-                
+            }  
                 debugOutput.AppendLine(new string('-', split));
                 Recur(obj, ref debugOutput);
                 debugOutput.AppendLine(new string('-', split));
@@ -507,7 +509,7 @@ namespace QvinExp
 
                 }
             }
-        }
+        }    
         #endregion
 
         #region SortMethodV3
@@ -556,9 +558,7 @@ namespace QvinExp
 
         #endregion
 
-        #region Pick up items and click on chest
-
-        private readonly Stopwatch pickUpTimer = Stopwatch.StartNew();
+        #region Pick up items and click on chest    
 
         //Deprecated
         private void TestPickUp()
@@ -651,7 +651,8 @@ namespace QvinExp
             _Working = false;
         }
 
-
+        List<Tuple<int, ItemsOnGroundLabelElement>> _currentLabels;
+      
         private void NewPickUp()
         {
             if (pickUpTimer.ElapsedMilliseconds < Settings.PickupTimerDelay)
@@ -660,14 +661,16 @@ namespace QvinExp
                 return;
             }
             pickUpTimer.Restart();
-            var currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
-                .Where(x => x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp)
-                .Select(x => new Tuple<int, ItemsOnGroundLabelElement>(GetEntityDistance(x.ItemOnGround), x))
-                .OrderBy(x => x.Item1)
-                .ToList();
-
-
-            var pickUpThisItem = (from x in currentLabels
+            if (_currentLabels == null || cacheTimer.ElapsedMilliseconds > Settings.CacheTimer)
+            {
+                _currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
+                    .Where(x => x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp)
+                    .Select(x => new Tuple<int, ItemsOnGroundLabelElement>(GetEntityDistance(x.ItemOnGround), x))
+                    .OrderBy(x => x.Item1)
+                    .ToList();
+                cacheTimer.Restart();
+            }
+            var pickUpThisItem = (from x in _currentLabels
                                      let lowerPath = x.Item2.ItemOnGround.GetComponent<WorldItem>()
                                          .ItemEntity.Path.ToLower()
                                      let sockets = x.Item2.ItemOnGround.GetComponent<WorldItem>()
@@ -675,8 +678,7 @@ namespace QvinExp
                                      where lowerPath.Contains("currency") || lowerPath.Contains("divinationcards") ||
                                            lowerPath.Contains("map") ||
                                            sockets.NumberOfSockets == 6 && x.Item1 < Settings.PickupPriorityRange
-                                     select x).FirstOrDefault() ?? currentLabels.FirstOrDefault();
-
+                                     select x).FirstOrDefault() ?? _currentLabels.FirstOrDefault();            
             if (pickUpThisItem != null)
             {
                 if (pickUpThisItem.Item1 >= Settings.PickupRange)

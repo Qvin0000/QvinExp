@@ -17,6 +17,8 @@ namespace QvinExp
             PickupRange = new RangeNode<int>(750, 1, 1000);
             PickupTimerDelay = new RangeNode<int>(100, 1, 1000);
             ChestRange = new RangeNode<int>(500, 1, 1000);
+            CacheTimer = new RangeNode<int>(200, 1, 1000);
+            fps = new RangeNode<int>(0, 0, 60);
         }
 
      
@@ -35,5 +37,9 @@ namespace QvinExp
         public RangeNode<int> ChestRange { get; set; }
         [Menu("Pickup Timer Delay")]
         public RangeNode<int> PickupTimerDelay { get; set; }
+        [Menu("Cache timer (experiment)")]
+        public RangeNode<int> CacheTimer { get; set; }
+        [Menu("PoeHUD FPS limit")]
+        public RangeNode<int> fps { get; set; }
     }
 }
