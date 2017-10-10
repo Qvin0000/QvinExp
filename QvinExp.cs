@@ -660,20 +660,23 @@ namespace QvinExp
                 return;
             }
             pickUpTimer.Restart();
-            
-            //Priority labels: currency div card map
             var currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
-                .Where(x => x.IsVisible && x.CanPickUp && 
-                x.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("currency")||
-                x.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("divinationcards") ||
-                x.ItemOnGround.GetComponent<WorldItem>().ItemEntity.Path.ToLower().Contains("map")).ToList();
-            //if priority far, pick first visible
-            if (GetMinEntitysDistance(currentLabels.Select(x=>x.ItemOnGround)) > Settings.PickupPriorityRange)
-            {
-                currentLabels = GameController.Game.IngameState.IngameUi.ItemsOnGroundLabels
-                    .Where(x => x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp).ToList();
-            }
-            var pickUpThisItem = currentLabels.Select(x => new Tuple<int, ItemsOnGroundLabelElement>(GetEntityDistance(x.ItemOnGround), x)).OrderBy(x=>x.Item1).FirstOrDefault();
+                .Where(x => x.ItemOnGround.Path.ToLower().Contains("worlditem") && x.IsVisible && x.CanPickUp)
+                .Select(x => new Tuple<int, ItemsOnGroundLabelElement>(GetEntityDistance(x.ItemOnGround), x))
+                .OrderBy(x => x.Item1)
+                .ToList();
+
+
+            var pickUpThisItem = (from x in currentLabels
+                                     let lowerPath = x.Item2.ItemOnGround.GetComponent<WorldItem>()
+                                         .ItemEntity.Path.ToLower()
+                                     let sockets = x.Item2.ItemOnGround.GetComponent<WorldItem>()
+                                         .ItemEntity.GetComponent<Sockets>()
+                                     where lowerPath.Contains("currency") || lowerPath.Contains("divinationcards") ||
+                                           lowerPath.Contains("map") ||
+                                           sockets.NumberOfSockets == 6 && x.Item1 < Settings.PickupPriorityRange
+                                     select x).FirstOrDefault() ?? currentLabels.FirstOrDefault();
+
             if (pickUpThisItem != null)
             {
                 if (pickUpThisItem.Item1 >= Settings.PickupRange)
@@ -684,12 +687,12 @@ namespace QvinExp
                 }
                 var vect = pickUpThisItem.Item2.Label.GetClientRect().Center;
                 var vectWindow = GameController.Window.GetWindowRectangle();
-                if (vect.Y+PIXEL_BORDER > vectWindow.Bottom || vect.Y-PIXEL_BORDER < vectWindow.Top)
+                if (vect.Y + PIXEL_BORDER > vectWindow.Bottom || vect.Y - PIXEL_BORDER < vectWindow.Top)
                 {
                     _Working = false;
                     return;
                 }
-                if (vect.X+PIXEL_BORDER > vectWindow.Right || vect.X-PIXEL_BORDER < vectWindow.Left)
+                if (vect.X + PIXEL_BORDER > vectWindow.Right || vect.X - PIXEL_BORDER < vectWindow.Left)
                 {
                     _Working = false;
                     return;
@@ -970,15 +973,6 @@ namespace QvinExp
 
             return (int)distanceToEntity;
         }
-
-
-        private int GetMinEntitysDistance(IEnumerable<Entity> entity)
-        {
-            if (entity == null || !entity.Any())
-                return int.MaxValue;
-            return entity.Select(GetEntityDistance).Min();
-        }
-
         #endregion
 
         #region TempFix
