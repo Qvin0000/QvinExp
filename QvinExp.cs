@@ -40,14 +40,21 @@ namespace QvinExp
             LoadIgnoredCells();
             _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
         }
+        private void DebugPerformance()
+        {
+            DebugPlugin.LogInfoMsg($"FPS Infinite While: {Graphics.FpsLoop}");
+            DebugPlugin.LogInfoMsg($"FPS Data: {Graphics.FpsData}");
+            DebugPlugin.LogInfoMsg($"FPS Render: {Graphics.FpsRender}");
+            DebugPlugin.LogInfoMsg($"Thread Sleep: {Graphics.Sleep}");
 
+        }
         public override void Render()
         {
-            if (Settings.fps.Value > 0)
-            {
-                Thread.Sleep(1000 / Settings.fps.Value);
-            } 
-            if (Keyboard.IsKeyDown((int) Keys.F1))
+
+            if(Settings.DebugPerformance)
+                DebugPerformance();
+
+            if (Keyboard.IsKeyDown((int) Keys.F1) && Settings.PickUpEnable)
             {
                 if (_Working)
                     return;
@@ -55,15 +62,13 @@ namespace QvinExp
                 NewPickUp();
             }
 
-            if (Keyboard.IsKeyDown((int)Keys.F2))
+            if (Keyboard.IsKeyDown((int)Keys.F2) && Settings.ChestClickEnable)
             {
 
                 if (_Working)
                     return;
                 _Working = true;
                  ClickOnChests();
-              
-                
             }
 
             if (Keyboard.IsKeyDown((int) Keys.PageDown) && GameController.Game.IngameState.IngameUi.InventoryPanel
@@ -260,7 +265,7 @@ namespace QvinExp
             var stashItems = stash.VisibleInventoryItems;
             _sortMethod = ChoiceSort(stashItems);
             var items = _sortMethod(stashItems);
-            
+
 
         //var SizeInv = (int)stash.SizeInv;
             var SizeInv = FIXGetSizeInventory();
@@ -338,10 +343,10 @@ namespace QvinExp
 
         private List<ItemQ> SortGems(List<NormalInventoryItem> items)
         {
-          
+
             var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("Gems".ToLower()))
                 .ToList();
-            
+
             var itemsData = GetItemsDataFromInventoryItems(tempItems);
 
             var itemsQ = (from iD in itemsData select new ItemQ(iD));
@@ -352,7 +357,7 @@ namespace QvinExp
 
         private List<ItemQ> SortJewelery(List<NormalInventoryItem> items)
         {
-          
+
             var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("rings") ||
                                              x.Item.Path.ToLower().Contains("amulet") ||
                                              x.Item.Path.ToLower().Contains("amulets")).ToList();
@@ -369,7 +374,7 @@ namespace QvinExp
 
         private List<ItemQ> SortJewels(List<NormalInventoryItem> items)
         {
-            
+
             var tempItems = items.Where(x => x.Item.Path.ToLower().Contains("jewels")
                                            ).ToList();
             var itemsData = GetItemsDataFromInventoryItems(tempItems);
@@ -443,7 +448,7 @@ namespace QvinExp
             defaultSettings = defaultSettings.Replace("]]", "]\n]");
             File.WriteAllText(filePath, defaultSettings);
         }
-       
+
 
         #region Debug
 
@@ -490,13 +495,13 @@ namespace QvinExp
                     str.AppendLine(space + o1.Item1 + ": " + o1.Item2);
                     Recur(o1.Item2, ref str);
                 }
-            }  
+            }
                 debugOutput.AppendLine(new string('-', split));
                 Recur(obj, ref debugOutput);
                 debugOutput.AppendLine(new string('-', split));
                 File.AppendAllText("DebugOject.txt", debugOutput.ToString());
-            
-           
+
+
         }
 
         private void DebugObject(IEnumerable<object> listObjects)
@@ -509,15 +514,15 @@ namespace QvinExp
 
                 }
             }
-        }    
+        }
         #endregion
 
         #region SortMethodV3
 
-        
 
-       
-    
+
+
+
         //Deprecated
         public List<NormalInventoryItem> SortMapsByInvPosition(IEnumerable<NormalInventoryItem> items)
         {
@@ -558,7 +563,7 @@ namespace QvinExp
 
         #endregion
 
-        #region Pick up items and click on chest    
+        #region Pick up items and click on chest
 
         //Deprecated
         private void TestPickUp()
@@ -579,7 +584,7 @@ namespace QvinExp
                     item = entity.GetComponent<WorldItem>().ItemEntity;
 
                 if (item == null) continue;
-           
+
                 var en = item.Path.ToLower();
                 var skip = false || en.Contains("currencyidentification") || en.Contains("CurrencyRerollMagicShard".ToLower()) || en.Contains("CurrencyUpgradeToMagicShard".ToLower());
                 if (skip) continue;
@@ -598,7 +603,7 @@ namespace QvinExp
                           .ItemEntity.Path.ToLower()
                           .Contains("divinationcards")) && x.Item1 < 500);
 
-            
+
             var tempList = orderedButOnlyCurrencyAndMap.Concat(orderedByDistance.Except(orderedButOnlyCurrencyAndMap))
                 .ToList();
 
@@ -613,12 +618,12 @@ namespace QvinExp
                 _Working = false;
                 return;
             }
-       
-            
+
+
             foreach (var tuple in tempList)
                 if (currentLabels.TryGetValue(tuple.Item2, out entityLabel))
                 {
-                 
+
                     if (entityLabel.IsVisible)
                     {
                         var rect = entityLabel.Label.GetClientRect();
@@ -652,7 +657,7 @@ namespace QvinExp
         }
 
         List<Tuple<int, ItemsOnGroundLabelElement>> _currentLabels;
-      
+
         private void NewPickUp()
         {
             if (pickUpTimer.ElapsedMilliseconds < Settings.PickupTimerDelay)
@@ -678,12 +683,13 @@ namespace QvinExp
                                      where lowerPath.Contains("currency") || lowerPath.Contains("divinationcards") ||
                                            lowerPath.Contains("map") ||
                                            sockets.NumberOfSockets == 6 && x.Item1 < Settings.PickupPriorityRange
-                                     select x).FirstOrDefault() ?? _currentLabels.FirstOrDefault();            
+                                     select x).FirstOrDefault() ?? _currentLabels.FirstOrDefault();
             if (pickUpThisItem != null)
             {
                 if (pickUpThisItem.Item1 >= Settings.PickupRange)
                 {
-                    ClickOnChests();
+                    if (Settings.NoItemsClickChest)
+                        ClickOnChests();
                     _Working = false;
                     return;
                 }
@@ -700,24 +706,24 @@ namespace QvinExp
                     return;
                 }
                 _clickWindowOffset = GameController.Window.GetWindowRectangle().TopLeft;
+                var lastCursorPosition = Mouse.GetCursorPositionVector();
                 Mouse.SetCursorPosAndLeftClick(vect + _clickWindowOffset, Settings.ExtraDelay);
-                //Return cursor to center screen
-                var centerScreen = GameController.Window.GetWindowRectangle().Center;
-                Mouse.SetCursorPos(centerScreen);
+                Mouse.SetCursorPos(lastCursorPosition);
             }
             else
             {
-                ClickOnChests();
+                if (Settings.NoItemsClickChest)
+                    ClickOnChests();
             }
             _Working = false;
         }
 
 
-         
+
         private void ClickOnChests()
         {
             var sortedByDistChest = new List<Tuple<int, long, EntityWrapper>>();
-           
+
             foreach (var entity in entities)
             {
                 if (entity.Path.ToLower().Contains("chests") && entity.IsAlive && entity.IsHostile)
@@ -766,7 +772,7 @@ namespace QvinExp
 
 
         #region SortMethodV4
-        
+
         private void SortItems()
         {
             var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
@@ -798,7 +804,7 @@ namespace QvinExp
                 }
                 item.oX = item.nX;
                 item.oY = item.nY;
-                
+
             }
             Thread.Sleep(250);
             //This fix for item on cursor
@@ -813,9 +819,9 @@ namespace QvinExp
                 }
             }
             _Working = false;
-          
-           
-          
+
+
+
 
         }
 
@@ -843,7 +849,7 @@ namespace QvinExp
         {
             ClickOnItemWShift(item.ItemData);
         }
-       
+
 
         private void ClickOnItemWShift(ItemData item)
         {
@@ -923,7 +929,7 @@ namespace QvinExp
                     stsh[item.InventPosX + i, item.InventPosY + j] = true;
             }
 
-           
+
             for (var i = 0; i < xMax; i++)
             for (var j = 0; j < yMax; j++)
                 if (!stsh[i, j]) return new Vector2(i, j);
@@ -944,8 +950,8 @@ namespace QvinExp
             }
             return itemDatas;
         }
-        
-       
+
+
         private Vector2 GetInventoryClickPosByCellIndex(Inventory inventory, int indexX, int indexY)
         {
             var rectInv = inventory.InventoryUiElement.GetClientRect();
@@ -991,7 +997,7 @@ namespace QvinExp
             var stash = GameController.Game.IngameState.ServerData.StashPanel.VisibleStash;
             return  Memory.ReadInt(stash.Address + 0x410, 0x658); //0- No hold item 1 - FreeSpace, 2 - ReplaceItem
     }
-       
+
         #endregion
     }
 }
